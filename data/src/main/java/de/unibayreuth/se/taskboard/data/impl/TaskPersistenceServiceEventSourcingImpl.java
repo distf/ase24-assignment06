@@ -121,7 +121,7 @@ public class TaskPersistenceServiceEventSourcingImpl implements TaskPersistenceS
     }
 
     @Override
-    public void delete(@NonNull UUID id) throws TaskNotFoundException {
+    public void delete(@NonNull UUID id) throws TaskNotFoundException, IllegalStateException {
         // TODO: Implement delete
 
         /*
@@ -132,5 +132,22 @@ public class TaskPersistenceServiceEventSourcingImpl implements TaskPersistenceS
         Checks if the task still exists in the taskRepository.
         If the task still exists, it throws an IllegalStateException indicating the task was not successfully deleted.
         */
+        // Try to find the task by its ID
+        TaskEntity taskEntity = taskRepository.findById(id)
+                .orElseThrow(() -> new TaskNotFoundException("Task with ID " + id + " does not exist."));
+
+        // Log delete event
+        eventRepository.saveAndFlush(
+                EventEntity.deleteEventOf(taskEntityMapper.fromEntity(taskEntity), taskEntity.getAssigneeId())
+        );
+
+        // Delete the task
+        taskRepository.deleteById(id);
+
+        // Check if the task still exists in the repository
+        if (taskRepository.existsById(id)) {
+            throw new IllegalStateException("Task with ID " + id + " was not successfully deleted.");
+        }
+
     }
 }
