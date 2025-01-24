@@ -7,12 +7,16 @@ import de.unibayreuth.se.taskboard.business.ports.TaskPersistenceService;
 import de.unibayreuth.se.taskboard.data.mapper.TaskEntityMapper;
 import de.unibayreuth.se.taskboard.data.persistence.EventEntity;
 import de.unibayreuth.se.taskboard.data.persistence.EventRepository;
+import de.unibayreuth.se.taskboard.data.persistence.TaskEntity;
 import de.unibayreuth.se.taskboard.data.persistence.TaskRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Primary;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +31,8 @@ public class TaskPersistenceServiceEventSourcingImpl implements TaskPersistenceS
     private final TaskRepository taskRepository;
     private final TaskEntityMapper taskEntityMapper;
     private final EventRepository eventRepository;
+    private final ObjectMapper objectMapper;
+
     @Override
     public void clear() {
         taskRepository.findAll()
@@ -80,8 +86,38 @@ public class TaskPersistenceServiceEventSourcingImpl implements TaskPersistenceS
         If the task ID is not null, it updates the existing task by finding it in the repository, updating its fields, saving an update event, and returning the updated task.
         In both cases, it uses the EventRepository to log the changes and the TaskRepository to persist the task data.
         */
+        // If the task ID is null, create a new task
+        if (task.getId() == null) {
+            // Create new task (no changes to check)
+            task.setId(UUID.randomUUID());
 
-        return new Task("title", "description");
+            // Save update event first before persisting
+            eventRepository.saveAndFlush(EventEntity.insertEventOf(task, task.getAssigneeId(), objectMapper));
+
+            // Save created task
+            TaskEntity taskEntity = taskRepository.saveAndFlush(taskEntityMapper.toEntity(task));
+
+            return taskEntityMapper.fromEntity(taskEntity);
+        } else {
+            // Update existing task
+            TaskEntity existingTaskEntity = taskRepository.findById(task.getId())
+                    .orElseThrow(() -> new TaskNotFoundException("Task with ID " + task.getId() + " does not exist."));
+
+            // Update fields
+            existingTaskEntity.setTitle(task.getTitle());
+            existingTaskEntity.setDescription(task.getDescription());
+            existingTaskEntity.setStatus(task.getStatus());
+            existingTaskEntity.setAssigneeId(task.getAssigneeId());
+            existingTaskEntity.setUpdatedAt(LocalDateTime.now(ZoneId.of("UTC")));
+
+            // Save update event first before persisting
+            eventRepository.saveAndFlush(EventEntity.updateEventOf(task, task.getAssigneeId(), objectMapper));
+
+            // Save updated task
+            taskRepository.saveAndFlush(existingTaskEntity);
+
+            return taskEntityMapper.fromEntity(existingTaskEntity);
+        }
     }
 
     @Override
